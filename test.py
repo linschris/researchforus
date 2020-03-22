@@ -143,7 +143,7 @@ def test_memory_architecture():
 
 def test_networkxkb():
     """Test the NetworkX KnowledgeStore."""
-    timer = 0
+
     def activation_fn(graph, mem_id, activation):
         graph.nodes[mem_id]['activation'].append(activation)
 
@@ -188,7 +188,6 @@ def test_networkxkb():
     iterator = store.graph.__iter__()
     for node in iterator:
         print(node + ":", (store.graph.nodes.get(node)['activation']))
-    iterator = store.graph
 
 
 

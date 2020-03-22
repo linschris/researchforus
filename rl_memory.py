@@ -445,11 +445,41 @@ class NetworkXKB(KnowledgeStore):
         self.query_results = None
         self.result_index = None
         self.time = 0
-        self.activaton_list = []
+        self.decay_rate = 0.5
         self.clear()
 
     def getTime(self):
         return self.time
+    def getDecayRate(self):
+        return self.decay_rate
+
+    # no [(3,0.5), (3, 1)], keep the higher one since it can't go any higher or lower
+    # sum from i to current time = (how long ago the event was) ^ -d(d changes depending on how fast the decay is)
+    # ^^ sorta have?
+
+    def update_neighbors(self, currNode, currentActivation, currentTime):
+        currNeighbors = self.graph.neighbors(currNode)
+        newActivation = round((currentActivation/2), 2)
+        for node in currNeighbors:
+            if node != currNode and newActivation > 0:
+                self.activation_fn(self.graph, node, [self.getTime(), newActivation])
+                self.update_neighbors(node, newActivation, currentTime)
+
+    def getActivation(self, nodeActivation, timePassed, decayRate):
+        decayAmount = round(pow(timePassed, decayRate * -1), 2)
+        newActivation = nodeActivation - decayAmount
+        return newActivation
+
+    def decay(self):
+        node_iterator = self.graph.__iter__()
+        for node in node_iterator:
+            currNode = self.graph.nodes.get(node)
+            size = len(self.graph.nodes.get(node)['activation'])
+            for i in range(size):
+                currActivation = currNode['activation'][i][1]
+                currNode['activation'][i][1] = self.getActivation(currActivation, self.getTime(), self.getDecayRate())
+        return
+
 
     def clear(self): # noqa: D102
         self.graph.clear()
@@ -461,25 +491,17 @@ class NetworkXKB(KnowledgeStore):
         if mem_id is None:
             mem_id = uuid()
         if mem_id not in self.graph:
-            self.graph.add_node(mem_id, activation=[(self.getTime(), self.getActivation())])
+            self.graph.add_node(mem_id, activation=[[self.getTime(), 1]])
         else:
-            self.activation_fn(self.graph, mem_id, [self.getTime(), self.getActivation()])
+            self.activation_fn(self.graph, mem_id, [self.getTime(), 1])
         for attribute, value in kwargs.items():
             if value not in self.graph:
-                self.graph.add_node(value, activation=[self.getTime(), self.getActivation()])
+                self.graph.add_node(value, activation=[])
             self.graph.add_edge(mem_id, value, attribute=attribute)
             self.inverted_index[attribute].add(mem_id)
+        self.update_neighbors(mem_id, 1, self.getTime())
         self.pass_time()
         return True
-
-    def getActivation(self):
-        activation = 1
-        if self.time != 0:
-            newActivation = activation / self.time
-            activation = round(newActivation, 2)
-        return activation
-
-
 
     def _activate_and_return(self, mem_id, activation):
         self.activation_fn(self.graph, mem_id, activation)
@@ -492,7 +514,8 @@ class NetworkXKB(KnowledgeStore):
         if mem_id not in self.graph:
             return None
         self.pass_time()
-        return self._activate_and_return(mem_id, [self.getTime(), self.getActivation()])
+        self.update_neighbors(mem_id, 1, self.getTime())
+        return self._activate_and_return(mem_id, [self.getTime(), 1])
 
     def query(self, attr_vals): # noqa: D102
         # first pass: get candidates with all the attributes
@@ -521,10 +544,12 @@ class NetworkXKB(KnowledgeStore):
         self.result_index = 0
         self.pass_time()
         node = self.query_results[self.result_index]
-        return self._activate_and_return(node, [self.getTime(), self.getActivation()])
+        return self._activate_and_return(node, [self.getTime(), 1])
 
     def pass_time(self, time=1):
         self.time += time
+        self.decay()
+
 
     @property
     def has_prev_result(self): # noqa: D102
@@ -536,7 +561,7 @@ class NetworkXKB(KnowledgeStore):
     def prev_result(self): # noqa: D102
         self.result_index -= 1
         currNode = self.query_results[self.result_index]
-        return self._activate_and_return(currNode, [self.getTime(), self.getActivation()])
+        return self._activate_and_return(currNode, [self.getTime(), 1])
 
     @property
     def has_next_result(self): # noqa: D102
@@ -548,7 +573,7 @@ class NetworkXKB(KnowledgeStore):
     def next_result(self): # noqa: D102
         self.result_index += 1
         currNode = self.query_results[self.result_index]
-        return self._activate_and_return(currNode, [self.getTime(), self.getActivation()])
+        return self._activate_and_return(currNode, [self.getTime(), 1])
 
     @staticmethod
     def retrievable(mem_id): # noqa: D102
